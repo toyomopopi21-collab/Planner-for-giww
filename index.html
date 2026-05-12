@@ -1,0 +1,738 @@
+import { useState, useEffect, useCallback } from “react”;
+
+/* ── CONSTANTS ── */
+const MONTHS_TH = [“มกราคม”,“กุมภาพันธ์”,“มีนาคม”,“เมษายน”,“พฤษภาคม”,“มิถุนายน”,“กรกฎาคม”,“สิงหาคม”,“กันยายน”,“ตุลาคม”,“พฤศจิกายน”,“ธันวาคม”];
+const DAYS_SHORT = [“อา”,“จ”,“อ”,“พ”,“พฤ”,“ศ”,“ส”];
+const DAYS_FULL  = [“วันอาทิตย์”,“วันจันทร์”,“วันอังคาร”,“วันพุธ”,“วันพฤหัสบดี”,“วันศุกร์”,“วันเสาร์”];
+const TT_DAYS    = [“จ”,“อ”,“พ”,“พฤ”,“ศ”];
+const TT_TIMES   = [“08:00”,“09:00”,“10:00”,“11:00”,“12:00”,“13:00”,“14:00”,“15:00”,“16:00”];
+const QUOTES = [
+“ทุกก้าวที่ก้าวคือการเข้าใกล้ฝันมากขึ้น ✨”,
+“เรียนหนักวันนี้ นอนหลับสบายในวันพรุ่งนี้ 📖”,
+“อย่ารอให้พร้อม จงเริ่มต้นแล้วจะพร้อมขึ้นมาเอง”,
+“ความสำเร็จไม่ได้เกิดขึ้นเอง มันเกิดจากความพยายาม 💪”,
+“เชื่อในตัวเอง เพราะคุณทำได้มากกว่าที่คิด 🌟”,
+“ทุกวันคือโอกาสใหม่ในการเรียนรู้และเติบโต”,
+];
+
+const SAMPLE_TASKS = () => {
+const t  = toDS(new Date());
+const t2 = toDS(new Date(Date.now() + 86400000));
+const t3 = toDS(new Date(Date.now() + 2*86400000));
+return [
+{ id:“s1”, name:“ทำการบ้านคณิตศาสตร์”, note:“หน้า 42–45 ข้อ 1–10”, subject:“คณิต”, prio:“high”, date:t,  time:“16:00”, done:false },
+{ id:“s2”, name:“อ่านหนังสือภาษาไทย”,  note:“บทที่ 3”,               subject:“ภาษาไทย”, prio:“med”,  date:t,  time:“19:00”, done:true  },
+{ id:“s3”, name:“ส่งรายงานวิทยาศาสตร์”, note:“ส่ง Google Classroom”,  subject:“วิทย์”,   prio:“high”, date:t2, time:“08:00”, done:false },
+{ id:“s4”, name:“ฝึกนำเสนอโปรเจกต์”,   note:“เตรียม Slide ให้ครบ”,  subject:“Social”,  prio:“med”,  date:t2, time:””,       done:false },
+{ id:“s5”, name:“ซื้อสมุดโน้ต”,          note:“ร้านใกล้บ้าน”,         subject:””,        prio:“low”,  date:””, time:””,       done:false },
+{ id:“s6”, name:“ทบทวนบทที่ 1–5”,       note:“เตรียมสอบปลายภาค”,    subject:“วิทย์”,   prio:“high”, date:t3, time:“14:00”, done:false },
+];
+};
+
+const SAMPLE_TT = {
+“0_1”:{subject:“คณิต”,room:“301”}, “0_2”:{subject:“ภาษาไทย”,room:“201”}, “0_4”:{subject:“วิทย์”,room:“Lab”},
+“1_1”:{subject:“อังกฤษ”,room:“202”}, “1_3”:{subject:“สังคม”,room:“301”}, “1_5”:{subject:“พละ”,room:“สนาม”},
+“2_2”:{subject:“คณิต”,room:“301”}, “2_3”:{subject:“วิทย์”,room:“Lab”},
+“3_1”:{subject:“ภาษาไทย”,room:“201”}, “3_4”:{subject:“อังกฤษ”,room:“202”},
+“4_2”:{subject:“สังคม”,room:“301”}, “4_3”:{subject:“คณิต”,room:“301”},
+};
+
+/* ── HELPERS ── */
+function toDS(d) {
+return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+function fmtTs(iso) {
+const d = new Date(iso);
+return `${d.getDate()} ${MONTHS_TH[d.getMonth()].slice(0,3)} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")} น.`;
+}
+function calCells(year, month) {
+const first = new Date(year, month, 1).getDay();
+const dim   = new Date(year, month+1, 0).getDate();
+const prevDim = new Date(year, month, 0).getDate();
+const total = Math.ceil((first + dim) / 7) * 7;
+const cells = [];
+for (let i = 0; i < total; i++) {
+if (i < first)          cells.push({ d: new Date(year, month-1, prevDim-first+i+1), cur: false });
+else if (i < first+dim) cells.push({ d: new Date(year, month, i-first+1),           cur: true  });
+else                    cells.push({ d: new Date(year, month+1, i-first-dim+1),      cur: false });
+}
+return cells;
+}
+
+/* ── THEME TOKENS ── */
+const T = {
+light: {
+bg: “#eef2ff”,
+surface: “#fff”,
+glass: “rgba(255,255,255,0.75)”,
+glass2: “rgba(255,255,255,0.50)”,
+navBg: “rgba(255,255,255,0.92)”,
+border: “rgba(99,132,255,0.18)”,
+border2: “rgba(99,132,255,0.10)”,
+text: “#111827”,
+text2: “#4b5563”,
+text3: “#9ca3af”,
+accent: “#4361ee”,
+accentLt: “rgba(67,97,238,0.10)”,
+accentGlow: “rgba(67,97,238,0.22)”,
+shadow: “0 2px 12px rgba(67,97,238,0.10)”,
+shadowMd: “0 6px 28px rgba(67,97,238,0.15)”,
+shadowLg: “0 12px 48px rgba(67,97,238,0.20)”,
+grad: “linear-gradient(135deg,#4361ee 0%,#7c3aed 100%)”,
+high:”#f43f5e”, highLt:“rgba(244,63,94,0.10)”,
+med:”#f59e0b”,  medLt:“rgba(245,158,11,0.10)”,
+low:”#10b981”,  lowLt:“rgba(16,185,129,0.10)”,
+purple:”#8b5cf6”, purpleLt:“rgba(139,92,246,0.10)”,
+},
+dark: {
+bg: “#070b14”,
+surface: “#101828”,
+glass: “rgba(16,24,40,0.82)”,
+glass2: “rgba(16,24,40,0.62)”,
+navBg: “rgba(8,12,22,0.96)”,
+border: “rgba(67,97,238,0.20)”,
+border2: “rgba(67,97,238,0.10)”,
+text: “#f1f5ff”,
+text2: “#94a3b8”,
+text3: “#475569”,
+accent: “#4361ee”,
+accentLt: “rgba(67,97,238,0.15)”,
+accentGlow: “rgba(67,97,238,0.25)”,
+shadow: “0 2px 12px rgba(0,0,0,0.35)”,
+shadowMd: “0 6px 28px rgba(0,0,0,0.42)”,
+shadowLg: “0 12px 48px rgba(0,0,0,0.55)”,
+grad: “linear-gradient(135deg,#4361ee 0%,#7c3aed 100%)”,
+high:”#f43f5e”, highLt:“rgba(244,63,94,0.12)”,
+med:”#f59e0b”,  medLt:“rgba(245,158,11,0.12)”,
+low:”#10b981”,  lowLt:“rgba(16,185,129,0.12)”,
+purple:”#8b5cf6”, purpleLt:“rgba(139,92,246,0.12)”,
+}
+};
+
+const PRIO_COLOR = (p, c) => ({
+high: { bg: c.highLt, color: c.high },
+med:  { bg: c.medLt,  color: c.med  },
+low:  { bg: c.lowLt,  color: c.low  },
+}[p] || { bg: c.accentLt, color: c.accent });
+
+const PRIO_LABEL = { high:“🔴 ด่วน”, med:“🟡 กลาง”, low:“🟢 ต่ำ” };
+
+/* ═══════════════════════════════════════
+MAIN APP
+═══════════════════════════════════════ */
+export default function App() {
+const [theme, setTheme]   = useState(“light”);
+const [page,  setPage]    = useState(“home”);
+const [tasks, setTasks]   = useState(SAMPLE_TASKS);
+const [tt,    setTT]      = useState(SAMPLE_TT);
+const [log,   setLog]     = useState([]);
+const [modal, setModal]   = useState(null); // null | {type, data}
+
+const c = T[theme];
+
+const logAct = useCallback((type, text) => {
+setLog(prev => [{ type, text, ts: new Date().toISOString() }, …prev].slice(0,150));
+}, []);
+
+/* ── task ops ── */
+const saveTask = (data) => {
+setTasks(prev => {
+if (data.id && prev.find(t=>t.id===data.id)) {
+logAct(“edit”, “แก้ไขงาน: “ + data.name);
+return prev.map(t => t.id===data.id ? data : t);
+}
+const newT = { …data, id: uid(), done: false };
+logAct(“add”, “เพิ่มงาน: “ + data.name);
+return […prev, newT];
+});
+setModal(null);
+};
+const toggleTask = (id) => {
+setTasks(prev => prev.map(t => {
+if (t.id !== id) return t;
+const done = !t.done;
+logAct(done ? “done” : “edit”, (done?“เสร็จแล้ว: “:“ยกเลิกเสร็จ: “) + t.name);
+return { …t, done };
+}));
+};
+const deleteTask = (id) => {
+const t = tasks.find(t=>t.id===id);
+if (t) { logAct(“del”,“ลบงาน: “+t.name); setTasks(prev=>prev.filter(x=>x.id!==id)); }
+};
+const saveTT = (key, val) => { setTT(prev => ({ …prev, [key]: val })); setModal(null); };
+const clearTT = (key)    => { setTT(prev => { const n={…prev}; delete n[key]; return n; }); setModal(null); };
+
+/* ── global styles ── */
+const pageStyle = {
+minHeight: “100vh”,
+background: c.bg,
+color: c.text,
+fontFamily: “‘Plus Jakarta Sans’,‘Noto Sans Thai’,sans-serif”,
+WebkitFontSmoothing: “antialiased”,
+position: “relative”,
+maxWidth: 430,
+margin: “0 auto”,
+overflow: “hidden”,
+};
+
+return (
+<div style={pageStyle}>
+{/* Global font import */}
+<style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; } ::-webkit-scrollbar { width: 3px; height: 3px; } ::-webkit-scrollbar-thumb { background: ${c.border}; border-radius: 99px; } button { cursor: pointer; font-family: inherit; } input, select, textarea { font-family: inherit; } @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} } @keyframes tcIn  { from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:translateY(0)} } @keyframes cbPop { 0%{transform:scale(.7)} 60%{transform:scale(1.2)} 100%{transform:scale(1)} } .pg-anim { animation: fadeUp .28s ease both; } .tc-anim { animation: tcIn .22s ease both; }`}</style>
+
+```
+  {/* Header */}
+  <Header c={c} theme={theme} setTheme={setTheme} onAdd={()=>setModal({type:"task",data:{date:toDS(new Date())}})} />
+
+  {/* Pages */}
+  <div style={{ paddingTop: 58, paddingBottom: 80 }}>
+    {page==="home"     && <PageHome     c={c} tasks={tasks} tt={tt} toggleTask={toggleTask} deleteTask={deleteTask} onEdit={t=>setModal({type:"task",data:t})} onAddTask={d=>setModal({type:"task",data:{date:d}})} onEditTT={(k,v)=>setModal({type:"tt",key:k,data:v})} />}
+    {page==="calendar" && <PageCalendar c={c} tasks={tasks} toggleTask={toggleTask} deleteTask={deleteTask} onEdit={t=>setModal({type:"task",data:t})} onAddTask={d=>setModal({type:"task",data:{date:d}})} />}
+    {page==="todo"     && <PageTodo     c={c} tasks={tasks} toggleTask={toggleTask} deleteTask={deleteTask} onEdit={t=>setModal({type:"task",data:t})} />}
+    {page==="activity" && <PageActivity c={c} log={log} />}
+  </div>
+
+  {/* Bottom Nav */}
+  <BottomNav c={c} page={page} setPage={setPage} />
+
+  {/* FAB */}
+  <button onClick={()=>setModal({type:"task",data:{date:toDS(new Date())}})}
+    style={{ position:"fixed", bottom:84, right:18, width:50, height:50, borderRadius:15, background:c.grad, border:"none", color:"#fff", fontSize:"1.4rem", boxShadow:c.shadowLg, display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, transition:"transform .2s" }}
+    onMouseEnter={e=>e.currentTarget.style.transform="scale(1.08)"}
+    onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
+  >＋</button>
+
+  {/* Modals */}
+  {modal?.type==="task" && <TaskModal c={c} data={modal.data} onSave={saveTask} onClose={()=>setModal(null)} />}
+  {modal?.type==="tt"   && <TTModal   c={c} slotKey={modal.key} data={modal.data} onSave={saveTT} onClear={clearTT} onClose={()=>setModal(null)} />}
+</div>
+```
+
+);
+}
+
+/* ═══════════════════════════════════════
+HEADER
+═══════════════════════════════════════ */
+function Header({ c, theme, setTheme, onAdd }) {
+return (
+<div style={{ position:“fixed”, top:0, left:“50%”, transform:“translateX(-50%)”, width:“100%”, maxWidth:430, height:58, background:c.navBg, backdropFilter:“blur(20px)”, WebkitBackdropFilter:“blur(20px)”, borderBottom:`1px solid ${c.border}`, display:“flex”, alignItems:“center”, justifyContent:“space-between”, padding:“0 18px”, zIndex:400 }}>
+<div style={{ display:“flex”, alignItems:“center”, gap:9 }}>
+<div style={{ width:32, height:32, borderRadius:9, background:c.grad, display:“flex”, alignItems:“center”, justifyContent:“center”, fontSize:”.85rem”, boxShadow:`0 4px 12px ${c.accentGlow}` }}>📚</div>
+<span style={{ fontSize:“1.05rem”, fontWeight:800, letterSpacing:”-.3px” }}>StudyFlow</span>
+</div>
+<div style={{ display:“flex”, gap:7 }}>
+{[[“🌙”,“☀️”,()=>setTheme(t=>t===“light”?“dark”:“light”)],[“＋”,“＋”,onAdd]].map(([a,b,fn],i)=>(
+<button key={i} onClick={fn} style={{ width:34, height:34, borderRadius:9, background:c.glass, backdropFilter:“blur(10px)”, border:`1px solid ${c.border}`, color:c.text2, fontSize:i===1?“1rem”:”.9rem”, display:“flex”, alignItems:“center”, justifyContent:“center”, transition:“all .18s” }}>
+{i===0?(theme===“light”?a:b):b}
+</button>
+))}
+</div>
+</div>
+);
+}
+
+/* ═══════════════════════════════════════
+BOTTOM NAV
+═══════════════════════════════════════ */
+const NAV_ITEMS = [[“home”,“🏠”,“หน้าหลัก”],[“calendar”,“📅”,“ปฏิทิน”],[“todo”,“✅”,“To-do”],[“activity”,“📜”,“กิจกรรม”]];
+function BottomNav({ c, page, setPage }) {
+return (
+<div style={{ position:“fixed”, bottom:12, left:“50%”, transform:“translateX(-50%)”, background:c.navBg, backdropFilter:“blur(20px)”, WebkitBackdropFilter:“blur(20px)”, border:`1px solid ${c.border}`, borderRadius:26, boxShadow:c.shadowLg, display:“flex”, alignItems:“center”, padding:“4px 5px”, gap:2, zIndex:400 }}>
+{NAV_ITEMS.map(([id, ic, lb]) => {
+const on = page===id;
+return (
+<button key={id} onClick={()=>setPage(id)} style={{ display:“flex”, flexDirection:“column”, alignItems:“center”, gap:2, padding:“7px 16px”, borderRadius:20, minWidth:64, background:on?c.accentLt:“none”, border:“none”, color:on?c.accent:c.text3, transition:“all .25s” }}>
+<span style={{ fontSize:“1.05rem”, transform:on?“scale(1.1) translateY(-1px)”:“scale(1)”, transition:“transform .25s”, display:“block” }}>{ic}</span>
+<span style={{ fontSize:”.58rem”, fontWeight:700 }}>{lb}</span>
+</button>
+);
+})}
+</div>
+);
+}
+
+/* ═══════════════════════════════════════
+SHARED: CARD
+═══════════════════════════════════════ */
+function Card({ c, children, style={} }) {
+return (
+<div style={{ background:c.glass, backdropFilter:“blur(20px)”, WebkitBackdropFilter:“blur(20px)”, border:`1px solid ${c.border}`, borderRadius:24, padding:“20px 18px”, boxShadow:c.shadow, marginBottom:13, …style }}>
+{children}
+</div>
+);
+}
+
+/* ═══════════════════════════════════════
+SHARED: TASK CARD
+═══════════════════════════════════════ */
+function TaskCard({ c, task, onToggle, onEdit, onDelete, delay=0 }) {
+const pc = PRIO_COLOR(task.prio, c);
+return (
+<div className=“tc-anim” style={{ animationDelay:`${delay}ms`, display:“flex”, alignItems:“flex-start”, gap:12, background:c.glass2, backdropFilter:“blur(10px)”, WebkitBackdropFilter:“blur(10px)”, border:`1px solid ${c.border2}`, borderRadius:16, padding:“14px 13px”, marginBottom:8, transition:“all .2s”, position:“relative”, overflow:“hidden”, opacity: task.done?0.45:1 }}>
+{/* Priority bar */}
+<div style={{ position:“absolute”, left:0, top:0, bottom:0, width:4, borderRadius:“16px 0 0 16px”, background: task.prio===“high”?c.high:task.prio===“med”?c.med:c.low }} />
+{/* Checkbox */}
+<button onClick={()=>onToggle(task.id)} style={{ width:22, height:22, borderRadius:7, border:`2px solid ${task.done?c.low:c.border}`, background:task.done?c.low:c.glass2, flexShrink:0, marginTop:1, display:“flex”, alignItems:“center”, justifyContent:“center”, transition:“all .2s”, animation:task.done?“cbPop .25s ease”:“none” }}>
+{task.done && <span style={{ fontSize:”.63rem”, color:”#fff”, fontWeight:800 }}>✓</span>}
+</button>
+{/* Body */}
+<div style={{ flex:1, minWidth:0 }}>
+<div style={{ fontSize:”.9rem”, fontWeight:600, marginBottom:5, lineHeight:1.4, color:c.text, textDecoration:task.done?“line-through”:“none” }}>{task.name}</div>
+<div style={{ display:“flex”, gap:5, flexWrap:“wrap”, alignItems:“center” }}>
+{task.time    && <Badge c={c} color={c.text3} bg="rgba(148,163,184,.12)">🕐 {task.time}</Badge>}
+{task.subject && <Badge c={c} color={c.accent} bg={c.accentLt}>{task.subject}</Badge>}
+<Badge c={c} color={pc.color} bg={pc.bg}>{PRIO_LABEL[task.prio]}</Badge>
+{!task.date   && <Badge c={c} color={c.purple} bg={c.purpleLt}>📌 ไม่มีวัน</Badge>}
+</div>
+{task.note && <div style={{ fontSize:”.72rem”, color:c.text2, marginTop:5, lineHeight:1.6 }}>{task.note}</div>}
+</div>
+{/* Actions */}
+<div style={{ display:“flex”, gap:2, flexShrink:0 }}>
+{[[“✎”,()=>onEdit(task),“edit”],[“✕”,()=>onDelete(task.id),“del”]].map(([ic,fn,t])=>(
+<button key={t} onClick={fn} style={{ width:28, height:28, borderRadius:8, border:“none”, background:“none”, color:c.text3, fontSize:”.8rem”, display:“flex”, alignItems:“center”, justifyContent:“center”, transition:“all .15s” }}
+onMouseEnter={e=>{e.currentTarget.style.background=t===“del”?c.highLt:c.accentLt;e.currentTarget.style.color=t===“del”?c.high:c.accent}}
+onMouseLeave={e=>{e.currentTarget.style.background=“none”;e.currentTarget.style.color=c.text3}}
+>{ic}</button>
+))}
+</div>
+</div>
+);
+}
+
+/* ── BADGE ── */
+function Badge({ c, color, bg, children }) {
+return <span style={{ display:“inline-flex”, alignItems:“center”, padding:“2px 8px”, borderRadius:99, fontSize:”.61rem”, fontWeight:700, background:bg, color, whiteSpace:“nowrap” }}>{children}</span>;
+}
+
+/* ── SECTION LABEL ── */
+function SL({ c, children, action, onAction }) {
+return (
+<div style={{ display:“flex”, alignItems:“center”, justifyContent:“space-between”, marginBottom:14 }}>
+<span style={{ fontSize:”.67rem”, fontWeight:800, textTransform:“uppercase”, letterSpacing:“1.6px”, color:c.text3 }}>{children}</span>
+{action && <button onClick={onAction} style={{ fontSize:”.74rem”, fontWeight:700, color:c.accent, background:“none”, border:“none”, padding:“4px 10px”, borderRadius:8 }}>{action}</button>}
+</div>
+);
+}
+
+/* ── EMPTY STATE ── */
+function Empty({ c, emoji, title, sub }) {
+return (
+<div style={{ textAlign:“center”, padding:“44px 16px”, color:c.text3 }}>
+<div style={{ fontSize:“3rem”, marginBottom:12 }}>{emoji}</div>
+<div style={{ fontSize:”.9rem”, fontWeight:700, color:c.text2, marginBottom:6 }}>{title}</div>
+<div style={{ fontSize:”.77rem”, lineHeight:1.7 }}>{sub}</div>
+</div>
+);
+}
+
+/* ═══════════════════════════════════════
+PAGE: HOME
+═══════════════════════════════════════ */
+function PageHome({ c, tasks, tt, toggleTask, deleteTask, onEdit, onAddTask, onEditTT }) {
+const now   = new Date();
+const today = toDS(now);
+const hr    = now.getHours();
+const greet = hr<5?“สวัสดียามดึก 🌙”:hr<12?“อรุณสวัสดิ์ ☀️”:hr<17?“สวัสดีตอนบ่าย 🌤”:hr<21?“สวัสดีตอนเย็น 🌇”:“ราตรีสวัสดิ์ 🌙”;
+const quote = QUOTES[Math.floor(Math.random()*QUOTES.length)];
+const todayT = tasks.filter(t=>t.date===today);
+const doneT  = todayT.filter(t=>t.done).length;
+const pct    = todayT.length?Math.round(doneT/todayT.length*100):0;
+const allDone= tasks.filter(t=>t.done).length;
+const allPct = tasks.length?Math.round(allDone/tasks.length*100):0;
+
+return (
+<div className=“pg-anim” style={{ padding:“18px 16px 0” }}>
+
+```
+  {/* Hero */}
+  <div style={{ background:c.grad, borderRadius:26, padding:"24px 22px", color:"#fff", marginBottom:14, position:"relative", overflow:"hidden", boxShadow:c.shadowLg }}>
+    <div style={{ position:"absolute", top:-50, right:-50, width:180, height:180, borderRadius:"50%", background:"rgba(255,255,255,.07)" }} />
+    <div style={{ position:"absolute", bottom:-70, left:-20, width:160, height:160, borderRadius:"50%", background:"rgba(255,255,255,.05)" }} />
+    <div style={{ fontSize:".69rem", fontWeight:600, opacity:.78, textTransform:"uppercase", letterSpacing:"1px", marginBottom:7 }}>{DAYS_FULL[now.getDay()]} • {now.getDate()} {MONTHS_TH[now.getMonth()]} {now.getFullYear()+543}</div>
+    <div style={{ fontSize:"1.5rem", fontWeight:800, lineHeight:1.2, marginBottom:8 }}>{greet}</div>
+    <div style={{ fontSize:".72rem", opacity:.82, lineHeight:1.65, fontStyle:"italic" }}>"{quote}"</div>
+    <div style={{ display:"flex", gap:10, marginTop:20 }}>
+      {[[todayT.length,"งานวันนี้"],[doneT,"เสร็จแล้ว"],[pct+"%","คืบหน้า"]].map(([n,l])=>(
+        <div key={l} style={{ flex:1, background:"rgba(255,255,255,.18)", borderRadius:14, padding:"10px 12px", textAlign:"center" }}>
+          <div style={{ fontSize:"1.35rem", fontWeight:800 }}>{n}</div>
+          <div style={{ fontSize:".58rem", opacity:.82, marginTop:2, fontWeight:500 }}>{l}</div>
+        </div>
+      ))}
+    </div>
+  </div>
+
+  {/* Progress */}
+  <Card c={c} style={{ padding:"18px 20px" }}>
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
+      <div>
+        <SL c={c} style={{ margin:0 }}>ภาพรวมทั้งหมด</SL>
+        <div style={{ fontSize:".86rem", fontWeight:700, marginTop:2 }}>ความคืบหน้า</div>
+      </div>
+      <div style={{ fontSize:"1.75rem", fontWeight:800, color:c.accent, lineHeight:1 }}>{allPct}%</div>
+    </div>
+    <div style={{ height:5, background:c.border, borderRadius:99, overflow:"hidden" }}>
+      <div style={{ height:"100%", width:`${allPct}%`, background:c.grad, borderRadius:99, transition:"width .7s ease" }} />
+    </div>
+    <div style={{ display:"flex", gap:8, marginTop:14 }}>
+      {[[tasks.length,"ทั้งหมด",c.accent],[allDone,"เสร็จ",c.low],[tasks.length-allDone,"เหลือ",c.text2],[tasks.filter(t=>!t.done&&t.prio==="high").length,"ด่วน 🔴",c.high]].map(([n,l,col])=>(
+        <div key={l} style={{ flex:1, background:c.surface, border:`1px solid ${c.border2}`, borderRadius:12, padding:"9px 6px", textAlign:"center" }}>
+          <div style={{ fontSize:"1.1rem", fontWeight:800, color:col }}>{n}</div>
+          <div style={{ fontSize:".58rem", color:c.text3, marginTop:2, fontWeight:600 }}>{l}</div>
+        </div>
+      ))}
+    </div>
+  </Card>
+
+  {/* Today tasks */}
+  <Card c={c}>
+    <SL c={c} action="+ เพิ่ม" onAction={()=>onAddTask(today)}>งานวันนี้</SL>
+    {todayT.length===0
+      ? <Empty c={c} emoji="📭" title="ว่างเปล่าวันนี้" sub="กด + เพิ่มงาน เพื่อเริ่มต้น" />
+      : [...todayT].sort((a,b)=>{if(a.done!==b.done)return a.done?1:-1;const p={high:0,med:1,low:2};return p[a.prio]-p[b.prio];}).map((t,i)=>(
+          <TaskCard key={t.id} c={c} task={t} onToggle={toggleTask} onEdit={onEdit} onDelete={deleteTask} delay={i*40} />
+        ))}
+  </Card>
+
+  {/* Timetable */}
+  <Card c={c}>
+    <SL c={c} action="แก้ไข" onAction={()=>onEditTT(null,null)}>ตารางเรียน</SL>
+    <div style={{ overflowX:"auto" }}>
+      <div style={{ display:"grid", gridTemplateColumns:"36px repeat(5,1fr)", gap:2, minWidth:300, fontSize:".6rem" }}>
+        <div />
+        {TT_DAYS.map(d=><div key={d} style={{ textAlign:"center", padding:"4px 2px", fontWeight:800, color:c.text2 }}>{d}</div>)}
+        {TT_TIMES.map((time,si)=>[
+          <div key={`t${si}`} style={{ textAlign:"right", padding:"6px 4px", color:c.text3, fontSize:".56rem", display:"flex", alignItems:"center", justifyContent:"flex-end" }}>{time.slice(0,5)}</div>,
+          ...[0,1,2,3,4].map(day=>{
+            const key=`${day}_${si+1}`, cell=tt[key];
+            return (
+              <div key={`${day}-${si}`} onClick={()=>onEditTT(key,cell)} style={{ minHeight:34, borderRadius:7, padding:4, cursor:"pointer", border:`1px solid ${cell?c.accent:"transparent"}`, background:cell?c.accentLt:"transparent", transition:"all .15s" }}>
+                {cell && <><div style={{ fontWeight:800, color:c.accent, fontSize:".58rem", lineHeight:1.3 }}>{cell.subject}</div>{cell.room&&<div style={{ color:c.text3, fontSize:".52rem" }}>{cell.room}</div>}</>}
+              </div>
+            );
+          })
+        ])}
+      </div>
+    </div>
+  </Card>
+
+</div>
+```
+
+);
+}
+
+/* ═══════════════════════════════════════
+PAGE: CALENDAR — FULL PLANNER GRID
+แสดง task chips ในทุกช่องวัน
+═══════════════════════════════════════ */
+function PageCalendar({ c, tasks, toggleTask, deleteTask, onEdit, onAddTask }) {
+const [calDate, setCalDate] = useState(new Date());
+const [selDate, setSelDate] = useState(toDS(new Date()));
+
+const y = calDate.getFullYear(), m = calDate.getMonth();
+const cells = calCells(y, m);
+const today = toDS(new Date());
+const selTasks = tasks.filter(t=>t.date===selDate);
+
+return (
+<div className=“pg-anim” style={{ padding:“18px 16px 0” }}>
+
+```
+  {/* Month nav */}
+  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+    <div>
+      <div style={{ fontSize:"1.15rem", fontWeight:800, letterSpacing:"-.3px" }}>{MONTHS_TH[m]}</div>
+      <div style={{ fontSize:".72rem", color:c.text3, marginTop:2 }}>{y+543}</div>
+    </div>
+    <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+      <button onClick={()=>setCalDate(new Date(y,m-1,1))} style={{ width:32, height:32, borderRadius:9, background:c.glass2, border:`1px solid ${c.border}`, color:c.text2, fontSize:".9rem", display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
+      <button onClick={()=>{setCalDate(new Date());setSelDate(today);}} style={{ padding:"6px 13px", borderRadius:9, background:c.accentLt, color:c.accent, border:"none", fontSize:".7rem", fontWeight:700 }}>วันนี้</button>
+      <button onClick={()=>setCalDate(new Date(y,m+1,1))} style={{ width:32, height:32, borderRadius:9, background:c.glass2, border:`1px solid ${c.border}`, color:c.text2, fontSize:".9rem", display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
+    </div>
+  </div>
+
+  {/* Full planner grid */}
+  <div style={{ background:c.glass, backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", border:`1px solid ${c.border}`, borderRadius:22, overflow:"hidden", boxShadow:c.shadow, marginBottom:14 }}>
+
+    {/* Day name header */}
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", borderBottom:`1px solid ${c.border}` }}>
+      {DAYS_SHORT.map((d,i)=>(
+        <div key={d} style={{ textAlign:"center", padding:"10px 0", fontSize:".62rem", fontWeight:800, color:(i===0||i===6)?c.accent:c.text3, borderRight:i<6?`1px solid ${c.border2}`:"none" }}>{d}</div>
+      ))}
+    </div>
+
+    {/* Cells grid */}
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)" }}>
+      {cells.map((cell, i)=>{
+        const cds = toDS(cell.d);
+        const dt  = tasks.filter(t=>t.date===cds);
+        const isToday  = cds===today;
+        const isSel    = cds===selDate;
+        const isOther  = !cell.cur;
+        const isWeekend= i%7===0||i%7===6;
+
+        return (
+          <div key={cds+i} onClick={()=>cell.cur&&setSelDate(cds)}
+            style={{
+              minHeight:80, borderRight:i%7<6?`1px solid ${c.border2}`:"none",
+              borderBottom:i<cells.length-7?`1px solid ${c.border2}`:"none",
+              padding:"7px 5px 5px", cursor:cell.cur?"pointer":"default",
+              background: isSel&&!isToday?c.accentLt:isToday?"rgba(67,97,238,.08)":"transparent",
+              opacity:isOther?.28:1, transition:"background .15s",
+            }}
+          >
+            {/* Day number */}
+            <div style={{ display:"flex", justifyContent:"center", marginBottom:5 }}>
+              <div style={{
+                width:24, height:24, borderRadius:9, display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:".72rem", fontWeight: isToday||isSel?800:500,
+                background:isToday?c.accent:isSel?c.accentLt:"transparent",
+                color:isToday?"#fff":isWeekend&&!isSel?c.accent:isSel?c.accent:c.text2,
+                boxShadow:isToday?`0 3px 10px ${c.accentGlow}`:"none",
+              }}>{cell.d.getDate()}</div>
+            </div>
+
+            {/* Task chips */}
+            <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+              {dt.slice(0,3).map(t=>(
+                <div key={t.id} onClick={e=>{e.stopPropagation();setSelDate(cds);}} style={{
+                  fontSize:".56rem", padding:"2px 5px", borderRadius:5, lineHeight:1.4, fontWeight:600,
+                  whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis",
+                  background: t.done?"rgba(148,163,184,.10)":t.prio==="high"?c.highLt:t.prio==="med"?c.medLt:c.lowLt,
+                  color: t.done?c.text3:t.prio==="high"?c.high:t.prio==="med"?c.med:c.low,
+                  textDecoration: t.done?"line-through":"none",
+                }}>
+                  {t.time?`${t.time.slice(0,5)} `:""}{ t.name}
+                </div>
+              ))}
+              {dt.length>3 && (
+                <div style={{ fontSize:".52rem", color:c.text3, paddingLeft:4 }}>+{dt.length-3} อื่นๆ</div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+
+  {/* Selected day panel */}
+  {selDate && (
+    <div style={{ background:c.glass, backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", border:`1px solid ${c.border}`, borderRadius:22, padding:"18px 16px", boxShadow:c.shadow, animation:"fadeUp .25s ease" }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+        <div>
+          <div style={{ fontSize:".95rem", fontWeight:800 }}>
+            {(()=>{const d=new Date(selDate);return`${DAYS_FULL[d.getDay()]} ${d.getDate()} ${MONTHS_TH[d.getMonth()]}`;})()}
+          </div>
+          <div style={{ fontSize:".7rem", color:c.text3, marginTop:2 }}>{selDate===today?"วันนี้":""}</div>
+        </div>
+        <div style={{ display:"flex", gap:6 }}>
+          <Badge c={c} color={c.accent} bg={c.accentLt}>{selTasks.length} งาน</Badge>
+          <button onClick={()=>onAddTask(selDate)} style={{ padding:"5px 12px", borderRadius:9, background:c.accent, color:"#fff", border:"none", fontSize:".72rem", fontWeight:700 }}>+ เพิ่ม</button>
+        </div>
+      </div>
+      {selTasks.length===0
+        ? <Empty c={c} emoji="📅" title="ไม่มีงานในวันนี้" sub="" />
+        : [...selTasks].sort((a,b)=>{if(a.done!==b.done)return a.done?1:-1;return (a.time||"99:99").localeCompare(b.time||"99:99");}).map((t,i)=>(
+            <TaskCard key={t.id} c={c} task={t} onToggle={toggleTask} onEdit={onEdit} onDelete={deleteTask} delay={i*35} />
+          ))}
+    </div>
+  )}
+</div>
+```
+
+);
+}
+
+/* ═══════════════════════════════════════
+PAGE: TODO
+═══════════════════════════════════════ */
+function PageTodo({ c, tasks, toggleTask, deleteTask, onEdit }) {
+const [filter, setFilter] = useState(“all”);
+const filters = [[“all”,“ทั้งหมด”],[“pending”,“ยังไม่เสร็จ”],[“done”,“เสร็จแล้ว”],[“high”,“🔴 ด่วน”],[“nodate”,“📌 ไม่มีวัน”]];
+const allDone = tasks.filter(t=>t.done).length;
+const pct     = tasks.length?Math.round(allDone/tasks.length*100):0;
+
+let filtered = tasks;
+if (filter===“pending”) filtered=tasks.filter(t=>!t.done);
+if (filter===“done”)    filtered=tasks.filter(t=>t.done);
+if (filter===“high”)    filtered=tasks.filter(t=>!t.done&&t.prio===“high”);
+if (filter===“nodate”)  filtered=tasks.filter(t=>!t.date);
+
+const groups = {};
+filtered.forEach(t=>{const k=t.date||”**nd**”;if(!groups[k])groups[k]=[];groups[k].push(t);});
+const keys = Object.keys(groups).sort((a,b)=>{if(a===”**nd**”)return 1;if(b===”**nd**”)return -1;return a.localeCompare(b);});
+
+return (
+<div className=“pg-anim” style={{ padding:“18px 16px 0” }}>
+<div style={{ fontSize:“1.15rem”, fontWeight:800, marginBottom:4 }}>✅ To-do List</div>
+<div style={{ fontSize:”.77rem”, color:c.text3, marginBottom:16 }}>รวมงานทั้งหมด ทั้งที่มีและไม่มีวัน</div>
+
+```
+  <Card c={c} style={{ padding:"14px 18px" }}>
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+      <span style={{ fontSize:".84rem", fontWeight:700 }}>ความคืบหน้า</span>
+      <span style={{ fontWeight:800, color:c.accent }}>{pct}%</span>
+    </div>
+    <div style={{ height:5, background:c.border, borderRadius:99, overflow:"hidden" }}>
+      <div style={{ height:"100%", width:`${pct}%`, background:c.grad, borderRadius:99, transition:"width .7s ease" }} />
+    </div>
+  </Card>
+
+  {/* Filters */}
+  <div style={{ display:"flex", gap:7, overflowX:"auto", scrollbarWidth:"none", paddingBottom:4, marginBottom:16 }}>
+    {filters.map(([id,lb])=>(
+      <button key={id} onClick={()=>setFilter(id)} style={{ whiteSpace:"nowrap", padding:"7px 15px", borderRadius:99, border:`1.5px solid ${filter===id?c.accent:c.border}`, background:filter===id?c.accent:c.glass, color:filter===id?"#fff":c.text2, fontSize:".73rem", fontWeight:700, transition:"all .18s", boxShadow:filter===id?`0 4px 12px ${c.accentGlow}`:"none" }}>{lb}</button>
+    ))}
+  </div>
+
+  {filtered.length===0
+    ? <Empty c={c} emoji="✨" title="ว่างเปล่าเลย!" sub="ไม่มีงานในหมวดนี้\nกดปุ่ม + เพื่อเพิ่มงานใหม่" />
+    : keys.map(k=>(
+        <div key={k}>
+          <div style={{ fontSize:".67rem", fontWeight:800, textTransform:"uppercase", letterSpacing:"1.4px", color:c.text3, margin:"18px 0 10px", display:"flex", alignItems:"center", gap:8 }}>
+            {k==="__nd__"?"📌 ไม่มีวันกำหนด":(()=>{const d=new Date(k);return`📅 ${d.getDate()} ${MONTHS_TH[d.getMonth()]} ${d.getFullYear()+543}`;})()}
+            <div style={{ flex:1, height:1, background:c.border2 }} />
+          </div>
+          {[...groups[k]].sort((a,b)=>{if(a.done!==b.done)return a.done?1:-1;const p={high:0,med:1,low:2};return p[a.prio]-p[b.prio];}).map((t,i)=>(
+            <TaskCard key={t.id} c={c} task={t} onToggle={toggleTask} onEdit={onEdit} onDelete={deleteTask} delay={i*35} />
+          ))}
+        </div>
+      ))
+  }
+</div>
+```
+
+);
+}
+
+/* ═══════════════════════════════════════
+PAGE: ACTIVITY
+═══════════════════════════════════════ */
+function PageActivity({ c, log }) {
+const icons = { add:“➕”, done:“✅”, del:“🗑️”, edit:“✏️” };
+const styles = {
+add:  { bg:“rgba(16,185,129,.10)”, border:“rgba(16,185,129,.3)” },
+done: { bg:c.accentLt,            border:c.accent },
+del:  { bg:c.highLt,              border:c.high },
+edit: { bg:c.medLt,               border:c.med },
+};
+return (
+<div className=“pg-anim” style={{ padding:“18px 16px 0” }}>
+<div style={{ fontSize:“1.15rem”, fontWeight:800, marginBottom:4 }}>📜 ประวัติกิจกรรม</div>
+<div style={{ fontSize:”.77rem”, color:c.text3, marginBottom:22 }}>ทุกการกระทำที่เกิดขึ้น</div>
+{log.length===0
+? <Empty c={c} emoji="📭" title="ยังไม่มีกิจกรรม" sub="เริ่มเพิ่มงานเพื่อเห็นประวัติ" />
+: (
+<div style={{ position:“relative”, paddingLeft:30 }}>
+<div style={{ position:“absolute”, left:11, top:4, bottom:0, width:1.5, background:`linear-gradient(to bottom,${c.accent},transparent)` }} />
+{log.map((a,i)=>{
+const st = styles[a.type]||styles.add;
+return (
+<div key={i} className=“tc-anim” style={{ animationDelay:`${i*.02}s`, position:“relative”, marginBottom:16 }}>
+<div style={{ position:“absolute”, left:-30, width:22, height:22, borderRadius:8, display:“flex”, alignItems:“center”, justifyContent:“center”, fontSize:”.7rem”, background:st.bg, border:`1.5px solid ${st.border}` }}>{icons[a.type]||“📌”}</div>
+<div style={{ background:c.glass, backdropFilter:“blur(10px)”, WebkitBackdropFilter:“blur(10px)”, border:`1px solid ${c.border2}`, borderRadius:14, padding:“11px 14px” }}>
+<div style={{ fontSize:”.84rem”, fontWeight:600, color:c.text, marginBottom:3 }}>{a.text}</div>
+<div style={{ fontSize:”.66rem”, color:c.text3 }}>{fmtTs(a.ts)}</div>
+</div>
+</div>
+);
+})}
+</div>
+)
+}
+</div>
+);
+}
+
+/* ═══════════════════════════════════════
+MODAL: TASK
+═══════════════════════════════════════ */
+function TaskModal({ c, data, onSave, onClose }) {
+const [form, setForm] = useState({ name:””, note:””, subject:””, prio:“med”, date:””, time:””, …data });
+const set = (k,v) => setForm(f=>({…f,[k]:v}));
+
+return (
+<ModalWrap c={c} onClose={onClose}>
+<div style={{ fontSize:“1.05rem”, fontWeight:800, marginBottom:18 }}>{data.id?“แก้ไขงาน”:“เพิ่มงานใหม่”}</div>
+<FG c={c} label="ชื่องาน *"><input className=“sf-inp” value={form.name} onChange={e=>set(“name”,e.target.value)} placeholder=“เช่น ทำการบ้าน, ส่งรายงาน…” style={inpStyle(c)} autoFocus /></FG>
+<FG c={c} label="หมายเหตุ"><textarea value={form.note} onChange={e=>set(“note”,e.target.value)} placeholder=“รายละเอียด…” style={{ …inpStyle(c), resize:“vertical”, minHeight:68, lineHeight:1.5 }} /></FG>
+<div style={{ display:“grid”, gridTemplateColumns:“1fr 1fr”, gap:11 }}>
+<FG c={c} label="วิชา / หมวด"><input value={form.subject} onChange={e=>set(“subject”,e.target.value)} placeholder=“เช่น คณิต…” style={inpStyle(c)} /></FG>
+<FG c={c} label="ความสำคัญ">
+<select value={form.prio} onChange={e=>set(“prio”,e.target.value)} style={inpStyle(c)}>
+<option value="high">🔴 สูง (ด่วน)</option>
+<option value="med">🟡 กลาง</option>
+<option value="low">🟢 ต่ำ</option>
+</select>
+</FG>
+</div>
+<div style={{ display:“grid”, gridTemplateColumns:“1fr 1fr”, gap:11 }}>
+<FG c={c} label="วันที่"><input type=“date” value={form.date} onChange={e=>set(“date”,e.target.value)} style={inpStyle(c)} /></FG>
+<FG c={c} label="เวลา"><input type=“time” value={form.time} onChange={e=>set(“time”,e.target.value)} style={inpStyle(c)} /></FG>
+</div>
+<div style={{ display:“flex”, gap:9, marginTop:18 }}>
+<button onClick={onClose} style={{ flex:1, padding:“12px 0”, borderRadius:12, background:c.accentLt, color:c.accent, border:“none”, fontWeight:700, fontSize:”.84rem” }}>ยกเลิก</button>
+<button onClick={()=>{if(!form.name.trim())return;onSave({…form,id:data.id});}} style={{ flex:1, padding:“12px 0”, borderRadius:12, background:c.grad, color:”#fff”, border:“none”, fontWeight:700, fontSize:”.84rem”, boxShadow:`0 4px 14px ${c.accentGlow}` }}>💾 บันทึก</button>
+</div>
+</ModalWrap>
+);
+}
+
+/* ─ TT Modal ─ */
+function TTModal({ c, slotKey, data, onSave, onClear, onClose }) {
+const [day,  setDay]  = useState(slotKey?parseInt(slotKey.split(”*”)[0]):0);
+const [slot, setSlot] = useState(slotKey?parseInt(slotKey.split(”*”)[1]):1);
+const [sub,  setSub]  = useState(data?.subject||””);
+const [room, setRoom] = useState(data?.room||””);
+
+return (
+<ModalWrap c={c} onClose={onClose}>
+<div style={{ fontSize:“1.05rem”, fontWeight:800, marginBottom:18 }}>แก้ไขตารางเรียน</div>
+<div style={{ display:“grid”, gridTemplateColumns:“1fr 1fr”, gap:11 }}>
+<FG c={c} label="วัน">
+<select value={day} onChange={e=>setDay(+e.target.value)} style={inpStyle(c)}>
+{[“จันทร์”,“อังคาร”,“พุธ”,“พฤหัส”,“ศุกร์”].map((d,i)=><option key={i} value={i}>{d}</option>)}
+</select>
+</FG>
+<FG c={c} label="ชั่วโมงที่ (1–9)"><input type=“number” min={1} max={9} value={slot} onChange={e=>setSlot(+e.target.value)} style={inpStyle(c)} /></FG>
+</div>
+<FG c={c} label="วิชา *"><input value={sub} onChange={e=>setSub(e.target.value)} placeholder=“เช่น คณิตศาสตร์” style={inpStyle(c)} /></FG>
+<FG c={c} label="ห้องเรียน"><input value={room} onChange={e=>setRoom(e.target.value)} placeholder=“เช่น 201” style={inpStyle(c)} /></FG>
+<div style={{ display:“flex”, gap:9, marginTop:18 }}>
+<button onClick={onClose} style={{ flex:1, padding:“11px 0”, borderRadius:12, background:c.accentLt, color:c.accent, border:“none”, fontWeight:700, fontSize:”.82rem” }}>ยกเลิก</button>
+<button onClick={()=>onClear(`${day}_${slot}`)} style={{ padding:“11px 18px”, borderRadius:12, background:c.highLt, color:c.high, border:“none”, fontWeight:700, fontSize:”.82rem” }}>ลบ</button>
+<button onClick={()=>{if(!sub.trim())return;onSave(`${day}_${slot}`,{subject:sub,room});}} style={{ flex:1, padding:“11px 0”, borderRadius:12, background:c.grad, color:”#fff”, border:“none”, fontWeight:700, fontSize:”.82rem” }}>บันทึก</button>
+</div>
+</ModalWrap>
+);
+}
+
+/* ─ Modal wrapper ─ */
+function ModalWrap({ c, children, onClose }) {
+return (
+<div onClick={onClose} style={{ position:“fixed”, inset:0, background:“rgba(15,23,42,.45)”, backdropFilter:“blur(8px)”, WebkitBackdropFilter:“blur(8px)”, zIndex:500, display:“flex”, alignItems:“flex-end”, justifyContent:“center” }}>
+<div onClick={e=>e.stopPropagation()} style={{ width:“100%”, maxWidth:430, maxHeight:“90dvh”, overflowY:“auto”, background:c.surface, border:`1px solid ${c.border}`, borderRadius:“26px 26px 0 0”, padding:“14px 20px 32px”, animation:“fadeUp .3s cubic-bezier(.4,0,.2,1)” }}>
+<div style={{ width:36, height:4, borderRadius:99, background:c.border, margin:“0 auto 18px” }} />
+{children}
+</div>
+</div>
+);
+}
+
+/* ─ Form group ─ */
+function FG({ c, label, children }) {
+return (
+<div style={{ marginBottom:13 }}>
+<label style={{ fontSize:”.66rem”, fontWeight:800, textTransform:“uppercase”, letterSpacing:“1.2px”, color:c.text2, display:“block”, marginBottom:7 }}>{label}</label>
+{children}
+</div>
+);
+}
+
+/* ─ Input style ─ */
+const inpStyle = c => ({
+width:“100%”, background:c.glass2, border:`1.5px solid ${c.border}`,
+borderRadius:11, padding:“11px 14px”, color:c.text, fontSize:”.87rem”, outline:“none”,
+});
